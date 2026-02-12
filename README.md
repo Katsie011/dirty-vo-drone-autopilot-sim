@@ -7,6 +7,11 @@ My goal is to learn, experiment, and gradually build towards a modular **percept
 I am designing this system for research, portfolio development. 
 Hope it too helps you in your journey.
 
+
+Naturally, I am trying to learn and move fast. So I will leverage the hell out of any AI tools I can find when it comes to writing the actual code. 
+Goal is to learn. And we gotta move quick.
+
+
 ## Overview
 
 The architecture is designed around a clear separation of concerns:
