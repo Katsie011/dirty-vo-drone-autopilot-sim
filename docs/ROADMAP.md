@@ -46,18 +46,18 @@ A clean, buildable, lintable repository that any contributor can clone and build
 
 ### Tasks
 
-| # | Task | Notes |
-|---|------|-------|
-| 0.1 | Initialize GitHub repository with MIT or Apache 2.0 license | Choose license before first commit |
-| 0.2 | Create ROS 2 workspace structure | All packages under `src/`; see MVP_COMPONENTS.md Section 1 |
-| 0.3 | Create stub packages (empty but buildable) | All 7 packages: `aeroperception_interfaces`, `bringup`, `bridge`, `perception`, `planning`, `sensors`, `logging` |
-| 0.4 | Define all MVP message/service types in `aeroperception_interfaces` | Do not use std_msgs hacks; define proper types now |
-| 0.5 | Add `px4_msgs` as a git submodule; pin to PX4 firmware version | **Version pin is mandatory**; document it in README |
-| 0.6 | Write `rosdep` dependency files for all packages | `package.xml` with all apt and pip dependencies listed |
-| 0.7 | Set up GitHub Actions CI | `colcon build`, `colcon test`, `ament_flake8`, `ament_cppcheck` |
-| 0.8 | Write root `README.md` | Setup instructions, architecture overview link, phase status badges |
-| 0.9 | Add this roadmap and the MVP architecture docs to `/docs` | |
-| 0.10 | Tag `v0.0.1-phase0` on passing CI | |
+| #    | Task                                                                | Notes                                                                                                            |
+| ---- | ------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| 0.1  | Initialize GitHub repository with MIT or Apache 2.0 license         | Choose license before first commit                                                                               |
+| 0.2  | Create ROS 2 workspace structure                                    | All packages under `src/`; see MVP_COMPONENTS.md Section 1                                                       |
+| 0.3  | Create stub packages (empty but buildable)                          | All 7 packages: `aeroperception_interfaces`, `bringup`, `bridge`, `perception`, `planning`, `sensors`, `logging` |
+| 0.4  | Define all MVP message/service types in `aeroperception_interfaces` | Do not use std_msgs hacks; define proper types now                                                               |
+| 0.5  | Add `px4_msgs` as a git submodule; pin to PX4 firmware version      | **Version pin is mandatory**; document it in README                                                              |
+| 0.6  | Write `rosdep` dependency files for all packages                    | `package.xml` with all apt and pip dependencies listed                                                           |
+| 0.7  | Set up GitHub Actions CI                                            | `colcon build`, `colcon test`, `ament_flake8`, `ament_cppcheck`                                                  |
+| 0.8  | Write root `README.md`                                              | Setup instructions, architecture overview link, phase status badges                                              |
+| 0.9  | Add this roadmap and the MVP architecture docs to `/docs`           |                                                                                                                  |
+| 0.10 | Tag `v0.0.1-phase0` on passing CI                                   |                                                                                                                  |
 
 ### Deliverables
 
@@ -83,19 +83,19 @@ Demonstrate programmatic flight control from ROS 2: arm → takeoff → hover �
 
 ### Tasks
 
-| # | Task | Notes |
-|---|------|-------|
-| 1.1 | Install PX4-Autopilot and verify `make px4_sitl gz_x500` builds | See Integration Guide Section 1.1 |
-| 1.2 | Install Micro-XRCE-DDS Agent | See Integration Guide Section 1.2 |
-| 1.3 | Verify `/fmu/out/*` topics appear in ROS 2 after agent connects | `ros2 topic list \| grep fmu` |
-| 1.4 | Implement `bridge_node` (C++) | Frame transforms, vehicle state publisher, arm/mode services |
-| 1.5 | Implement `imu_adapter_node` (C++) | `SensorCombined` → `sensor_msgs/Imu` |
-| 1.6 | Write unit tests for NED↔ENU transforms | Test against known poses; CI must pass |
-| 1.7 | Implement `aeroperception_bringup/launch/bridge.launch.py` | Launches XRCE agent + bridge_node |
-| 1.8 | Write Phase 1 validation script: arm → takeoff → hover → land | `scripts/test_takeoff.py` |
-| 1.9 | Connect QGC on UDP 14550; confirm vehicle telemetry visible | |
-| 1.10 | Record Phase 1 demo bag | Replay in Foxglove; confirm altitude profile |
-| 1.11 | Tag `v0.1.0-phase1` | |
+| #    | Task                                                            | Notes                                                        |
+| ---- | --------------------------------------------------------------- | ------------------------------------------------------------ |
+| 1.1  | Install PX4-Autopilot and verify `make px4_sitl gz_x500` builds | See Integration Guide Section 1.1                            |
+| 1.2  | Install Micro-XRCE-DDS Agent                                    | See Integration Guide Section 1.2                            |
+| 1.3  | Verify `/fmu/out/*` topics appear in ROS 2 after agent connects | `ros2 topic list \| grep fmu`                                |
+| 1.4  | Implement `bridge_node` (C++)                                   | Frame transforms, vehicle state publisher, arm/mode services |
+| 1.5  | Implement `imu_adapter_node` (C++)                              | `SensorCombined` → `sensor_msgs/Imu`                         |
+| 1.6  | Write unit tests for NED↔ENU transforms                         | Test against known poses; CI must pass                       |
+| 1.7  | Implement `aeroperception_bringup/launch/bridge.launch.py`      | Launches XRCE agent + bridge_node                            |
+| 1.8  | Write Phase 1 validation script: arm → takeoff → hover → land   | `scripts/test_takeoff.py`                                    |
+| 1.9  | Connect QGC on UDP 14550; confirm vehicle telemetry visible     |                                                              |
+| 1.10 | Record Phase 1 demo bag                                         | Replay in Foxglove; confirm altitude profile                 |
+| 1.11 | Tag `v0.1.0-phase1`                                             |                                                              |
 
 ### Deliverables
 
@@ -110,11 +110,11 @@ Running `ros2 launch aeroperception_bringup bridge.launch.py` followed by `ros2 
 
 ### Key Risks
 
-| Risk | Mitigation |
-|------|-----------|
-| px4_msgs version mismatch | Pin submodule hash; document in README; add CI check |
-| OFFBOARD rejection | Pre-publish setpoints for ≥1 s before mode change (documented in bridge_node) |
-| Gazebo Gz camera topic name changes between PX4 versions | Use `gz topic -l` to verify; update bridge config |
+| Risk                                                     | Mitigation                                                                    |
+| -------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| px4_msgs version mismatch                                | Pin submodule hash; document in README; add CI check                          |
+| OFFBOARD rejection                                       | Pre-publish setpoints for ≥1 s before mode change (documented in bridge_node) |
+| Gazebo Gz camera topic name changes between PX4 versions | Use `gz topic -l` to verify; update bridge config                             |
 
 ---
 
@@ -133,21 +133,21 @@ VIO output is injected into PX4's EKF2 (EKF2 fuses it, though GPS is also availa
 
 ### Tasks
 
-| # | Task | Notes |
-|---|------|-------|
-| 2.1 | Set up Gazebo camera bridge via `ros_gz_bridge` | See Integration Guide Section 2.1; verify `/camera/image_raw` topic |
-| 2.2 | Get exact camera intrinsics from `/camera/camera_info` | Log `fx, fy, cx, cy` for OpenVINS config |
-| 2.3 | Install OpenVINS (`ov_msckf`) as a workspace package | See Integration Guide Section 2.1 |
-| 2.4 | Write OpenVINS config YAML for Gazebo X500 camera | `sim_x500.yaml`; tune IMU noise params |
-| 2.5 | Write `vio_node` wrapper (C++) | Launches OpenVINS; remaps output to `/state/visual_odometry` |
-| 2.6 | Write `perception_coordinator_node` (Python) | Aggregates VIO + detector health |
-| 2.7 | Set PX4 EKF2 parameters for VIO fusion | Via QGC or param file |
-| 2.8 | Verify EKF2 fuses VIO (check `ekf2 status` in PX4 shell) | |
-| 2.9 | Export YOLOv8-nano to ONNX | `yolov8n.onnx`; store in `aeroperception_perception/models/` |
-| 2.10 | Write `detector_node` (Python) | ONNX Runtime CPU inference; publishes `Detection2DArray` |
-| 2.11 | Write `aeroperception_bringup/launch/perception.launch.py` | Launches camera bridge + vio + detector + coordinator |
-| 2.12 | Record Phase 2 demo bag | VIO pose + detection overlay in Foxglove |
-| 2.13 | Tag `v0.2.0-phase2` | |
+| #    | Task                                                       | Notes                                                               |
+| ---- | ---------------------------------------------------------- | ------------------------------------------------------------------- |
+| 2.1  | Set up Gazebo camera bridge via `ros_gz_bridge`            | See Integration Guide Section 2.1; verify `/camera/image_raw` topic |
+| 2.2  | Get exact camera intrinsics from `/camera/camera_info`     | Log `fx, fy, cx, cy` for OpenVINS config                            |
+| 2.3  | Install OpenVINS (`ov_msckf`) as a workspace package       | See Integration Guide Section 2.1                                   |
+| 2.4  | Write OpenVINS config YAML for Gazebo X500 camera          | `sim_x500.yaml`; tune IMU noise params                              |
+| 2.5  | Write `vio_node` wrapper (C++)                             | Launches OpenVINS; remaps output to `/state/visual_odometry`        |
+| 2.6  | Write `perception_coordinator_node` (Python)               | Aggregates VIO + detector health                                    |
+| 2.7  | Set PX4 EKF2 parameters for VIO fusion                     | Via QGC or param file                                               |
+| 2.8  | Verify EKF2 fuses VIO (check `ekf2 status` in PX4 shell)   |                                                                     |
+| 2.9  | Export YOLOv8-nano to ONNX                                 | `yolov8n.onnx`; store in `aeroperception_perception/models/`        |
+| 2.10 | Write `detector_node` (Python)                             | ONNX Runtime CPU inference; publishes `Detection2DArray`            |
+| 2.11 | Write `aeroperception_bringup/launch/perception.launch.py` | Launches camera bridge + vio + detector + coordinator               |
+| 2.12 | Record Phase 2 demo bag                                    | VIO pose + detection overlay in Foxglove                            |
+| 2.13 | Tag `v0.2.0-phase2`                                        |                                                                     |
 
 ### Deliverables
 
@@ -166,12 +166,12 @@ After `ros2 launch aeroperception_bringup perception.launch.py`:
 
 ### Key Risks
 
-| Risk | Mitigation |
-|------|-----------|
-| OpenVINS fails to initialize in simulation | Check camera info matches config; try gentle yaw rotation command to give parallax |
-| EKF2 rejects VIO (bad covariance) | Tune `EKF2_EV_NOISE_MD` and VIO output covariance in OpenVINS config |
-| YOLOv8 runs too slowly | Reduce input resolution to 416×416; reduce inference rate to 5 Hz |
-| Gazebo camera topic name differs from expected | `gz topic -l` to find actual name; update bridge YAML |
+| Risk                                           | Mitigation                                                                         |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------- |
+| OpenVINS fails to initialize in simulation     | Check camera info matches config; try gentle yaw rotation command to give parallax |
+| EKF2 rejects VIO (bad covariance)              | Tune `EKF2_EV_NOISE_MD` and VIO output covariance in OpenVINS config               |
+| YOLOv8 runs too slowly                         | Reduce input resolution to 416×416; reduce inference rate to 5 Hz                  |
+| Gazebo camera topic name differs from expected | `gz topic -l` to find actual name; update bridge YAML                              |
 
 ---
 
@@ -186,16 +186,16 @@ The vehicle flies to a sequence of 4+ waypoints autonomously using the waypoint 
 
 ### Tasks
 
-| # | Task | Notes |
-|---|------|-------|
-| 3.1 | Implement `waypoint_planner_node` (C++) | Linear interpolation + velocity capping; see Components doc Section 5.2 |
-| 3.2 | Verify planner publishes at 50 Hz with correct NED setpoints via bridge | Check `/fmu/in/trajectory_setpoint` values |
-| 3.3 | Test single-waypoint flight (manual goal publish) | `ros2 topic pub /mission/active_goal ...` |
-| 3.4 | Add waypoint acceptance radius logic | Vehicle must stay within 0.5 m of waypoint before "reached" |
-| 3.5 | Add a static obstacle box to Gazebo world | See Integration Guide Section 3.3; confirm vehicle clears it by altitude |
-| 3.6 | Write `aeroperception_bringup/launch/planning.launch.py` | Launches bridge + planner |
-| 3.7 | Record Phase 3 demo bag | 4-waypoint flight path visible in Foxglove 3D panel |
-| 3.8 | Tag `v0.3.0-phase3` | |
+| #   | Task                                                                    | Notes                                                                    |
+| --- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| 3.1 | Implement `waypoint_planner_node` (C++)                                 | Linear interpolation + velocity capping; see Components doc Section 5.2  |
+| 3.2 | Verify planner publishes at 50 Hz with correct NED setpoints via bridge | Check `/fmu/in/trajectory_setpoint` values                               |
+| 3.3 | Test single-waypoint flight (manual goal publish)                       | `ros2 topic pub /mission/active_goal ...`                                |
+| 3.4 | Add waypoint acceptance radius logic                                    | Vehicle must stay within 0.5 m of waypoint before "reached"              |
+| 3.5 | Add a static obstacle box to Gazebo world                               | See Integration Guide Section 3.3; confirm vehicle clears it by altitude |
+| 3.6 | Write `aeroperception_bringup/launch/planning.launch.py`                | Launches bridge + planner                                                |
+| 3.7 | Record Phase 3 demo bag                                                 | 4-waypoint flight path visible in Foxglove 3D panel                      |
+| 3.8 | Tag `v0.3.0-phase3`                                                     |                                                                          |
 
 ### Deliverables
 
@@ -209,11 +209,11 @@ Vehicle reaches all 4 waypoints in a pre-defined test route, with each waypoint 
 
 ### Key Risks
 
-| Risk | Mitigation |
-|------|-----------|
-| Velocity overshoot past waypoints | Tune `kp` (proportional gain) and `max_velocity` in planner config |
-| Yaw control oscillation | Limit yaw rate; P controller on yaw error |
-| Setpoint integration drift | Planner must use fresh `vehicle_state` each cycle; no integrating old positions |
+| Risk                              | Mitigation                                                                      |
+| --------------------------------- | ------------------------------------------------------------------------------- |
+| Velocity overshoot past waypoints | Tune `kp` (proportional gain) and `max_velocity` in planner config              |
+| Yaw control oscillation           | Limit yaw rate; P controller on yaw error                                       |
+| Setpoint integration drift        | Planner must use fresh `vehicle_state` each cycle; no integrating old positions |
 
 ---
 
@@ -228,19 +228,19 @@ The Mission Manager FSM drives a complete mission from a single `ros2 service ca
 
 ### Tasks
 
-| # | Task | Notes |
-|---|------|-------|
-| 4.1 | Implement `mission_manager_node` (Python) | 5-state FSM; see Components doc Section 5.1 |
-| 4.2 | Implement `/mission/load` and `/mission/start` services | JSON-deserialized waypoint list |
-| 4.3 | Wire perception health gate into TAKEOFF → EXECUTING transition | Do not enter EXECUTING until `overall_healthy = true` |
-| 4.4 | Write `aeroperception_bringup/launch/simulation.launch.py` | One command launches everything in correct order |
-| 4.5 | Configure rosbag2 MCAP recorder with essentials preset | Auto-starts with simulation.launch.py |
-| 4.6 | Run end-to-end: `simulation.launch.py` → `load mission` → `start` → fly → land | |
-| 4.7 | Replay bag in Foxglove; verify all key topics present and correct | See Integration Guide Section 4.3 |
-| 4.8 | Write MVP acceptance test (automated or documented checklist) | See Integration Guide Section 4.4 |
-| 4.9 | Record Phase 4 demo video | Screen capture: Gazebo + QGC + Foxglove replay |
-| 4.10 | Write post-MVP retrospective (1 page): what worked, what surprised us, what changes for Phase 5 | |
-| 4.11 | Tag `v0.4.0-mvp` | This is the portfolio-ready deliverable |
+| #    | Task                                                                                            | Notes                                                 |
+| ---- | ----------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| 4.1  | Implement `mission_manager_node` (Python)                                                       | 5-state FSM; see Components doc Section 5.1           |
+| 4.2  | Implement `/mission/load` and `/mission/start` services                                         | JSON-deserialized waypoint list                       |
+| 4.3  | Wire perception health gate into TAKEOFF → EXECUTING transition                                 | Do not enter EXECUTING until `overall_healthy = true` |
+| 4.4  | Write `aeroperception_bringup/launch/simulation.launch.py`                                      | One command launches everything in correct order      |
+| 4.5  | Configure rosbag2 MCAP recorder with essentials preset                                          | Auto-starts with simulation.launch.py                 |
+| 4.6  | Run end-to-end: `simulation.launch.py` → `load mission` → `start` → fly → land                  |                                                       |
+| 4.7  | Replay bag in Foxglove; verify all key topics present and correct                               | See Integration Guide Section 4.3                     |
+| 4.8  | Write MVP acceptance test (automated or documented checklist)                                   | See Integration Guide Section 4.4                     |
+| 4.9  | Record Phase 4 demo video                                                                       | Screen capture: Gazebo + QGC + Foxglove replay        |
+| 4.10 | Write post-MVP retrospective (1 page): what worked, what surprised us, what changes for Phase 5 |                                                       |
+| 4.11 | Tag `v0.4.0-mvp`                                                                                | This is the portfolio-ready deliverable               |
 
 ### Deliverables
 
@@ -297,18 +297,18 @@ Pass criteria:
 
 ### Planned Tasks
 
-| Area | Task |
-|------|------|
-| **Perception hardening** | Add camera distortion, lens noise, rolling shutter to Gazebo camera model |
-| **IMU hardening** | Add realistic IMU noise (Brownian noise, bias instability) to Gazebo IMU |
-| **Lighting variation** | Simulate dawn, midday, dusk, artificial lighting in Gazebo world |
-| **VIO benchmark** | Run OpenVINS and ORB-SLAM3 against EuRoC dataset; compare to SITL performance |
-| **Detection benchmark** | Measure YOLOv8-nano FPS under CPU load; evaluate on-Jetson inference path |
-| **Planner upgrade** | Replace linear interpolator with A* or RRT* for static obstacle avoidance |
-| **FSM upgrade** | Extend to full 9-state FSM with degraded-mode recovery |
-| **MAVROS fallback** | Document and test MAVROS bridge as an alternative |
-| **ORB-SLAM3 backend** | Add as pluggable VIO backend for loop-closure evaluation |
-| **Hardware checklist** | Document SITL assumptions; create hardware validation plan |
+| Area                     | Task                                                                          |
+| ------------------------ | ----------------------------------------------------------------------------- |
+| **Perception hardening** | Add camera distortion, lens noise, rolling shutter to Gazebo camera model     |
+| **IMU hardening**        | Add realistic IMU noise (Brownian noise, bias instability) to Gazebo IMU      |
+| **Lighting variation**   | Simulate dawn, midday, dusk, artificial lighting in Gazebo world              |
+| **VIO benchmark**        | Run OpenVINS and ORB-SLAM3 against EuRoC dataset; compare to SITL performance |
+| **Detection benchmark**  | Measure YOLOv8-nano FPS under CPU load; evaluate on-Jetson inference path     |
+| **Planner upgrade**      | Replace linear interpolator with A* or RRT* for static obstacle avoidance     |
+| **FSM upgrade**          | Extend to full 9-state FSM with degraded-mode recovery                        |
+| **MAVROS fallback**      | Document and test MAVROS bridge as an alternative                             |
+| **ORB-SLAM3 backend**    | Add as pluggable VIO backend for loop-closure evaluation                      |
+| **Hardware checklist**   | Document SITL assumptions; create hardware validation plan                    |
 
 ---
 
@@ -316,16 +316,16 @@ Pass criteria:
 
 These are not forgotten. They are deferred to the full architecture phase after a successful MVP.
 
-| Feature | When |
-|---------|------|
-| Hardware flight | After Phase 5 simulation hardening |
-| Encrypted communications | Before any hardware field test |
-| Terrain-aware planning | Full architecture Phase 1 |
-| Thermal / night perception | Full architecture Phase 2 |
-| Precision landing | Full architecture Phase 2 |
-| Multi-UAV fleet | Full architecture Phase 3 |
-| Security / surveillance behaviors | Full architecture Phase 2–3 |
-| Forensic logging | Full architecture Phase 2 |
+| Feature                           | When                               |
+| --------------------------------- | ---------------------------------- |
+| Hardware flight                   | After Phase 5 simulation hardening |
+| Encrypted communications          | Before any hardware field test     |
+| Terrain-aware planning            | Full architecture Phase 1          |
+| Thermal / night perception        | Full architecture Phase 2          |
+| Precision landing                 | Full architecture Phase 2          |
+| Multi-UAV fleet                   | Full architecture Phase 3          |
+| Security / surveillance behaviors | Full architecture Phase 2–3        |
+| Forensic logging                  | Full architecture Phase 2          |
 
 ---
 

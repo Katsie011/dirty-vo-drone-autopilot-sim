@@ -50,15 +50,15 @@ For the MVP, we treat PX4 as a black box with a clean interface. We do not modif
 
 The only PX4 parameters we touch:
 
-| Parameter | Value | Reason |
-|-----------|-------|--------|
-| `EKF2_AID_MASK` | Enable vision pose fusion | Accept VIO from companion |
-| `EKF2_EV_DELAY` | ~50 ms | Expected VIO latency |
-| `EKF2_HGT_REF` | vision (when GPS-denied testing) or baro+GPS | Height reference |
-| `COM_RCL_EXCEPT` | 4 (offboard) | Don't failsafe on RC loss during OFFBOARD |
-| `NAV_RCL_ACT` | 3 (RTL) | RC loss action |
-| `GF_ACTION` | 1 (warn) | Geofence action during development |
-| `MC_YAWRATE_MAX` | 60 deg/s | Reasonable yaw rate for smooth VIO |
+| Parameter        | Value                                        | Reason                                    |
+| ---------------- | -------------------------------------------- | ----------------------------------------- |
+| `EKF2_AID_MASK`  | Enable vision pose fusion                    | Accept VIO from companion                 |
+| `EKF2_EV_DELAY`  | ~50 ms                                       | Expected VIO latency                      |
+| `EKF2_HGT_REF`   | vision (when GPS-denied testing) or baro+GPS | Height reference                          |
+| `COM_RCL_EXCEPT` | 4 (offboard)                                 | Don't failsafe on RC loss during OFFBOARD |
+| `NAV_RCL_ACT`    | 3 (RTL)                                      | RC loss action                            |
+| `GF_ACTION`      | 1 (warn)                                     | Geofence action during development        |
+| `MC_YAWRATE_MAX` | 60 deg/s                                     | Reasonable yaw rate for smooth VIO        |
 
 ### 2.2 SITL Launch Target
 
@@ -74,12 +74,12 @@ The `gz_x500` model provides:
 
 ### 2.3 What PX4 Gives Us (Topics Available After Bridge)
 
-| Topic | Type | Rate | Used By |
-|-------|------|------|---------|
-| `/fmu/out/vehicle_local_position` | `VehicleLocalPosition` | 50 Hz | Bridge, Planner |
-| `/fmu/out/vehicle_status` | `VehicleStatus` | 5 Hz | Mission Manager |
-| `/fmu/out/battery_status` | `BatteryStatus` | 1 Hz | Mission Manager, Logging |
-| `/fmu/out/sensor_combined` | `SensorCombined` | 100 Hz | VIO (IMU source) |
+| Topic                             | Type                   | Rate   | Used By                  |
+| --------------------------------- | ---------------------- | ------ | ------------------------ |
+| `/fmu/out/vehicle_local_position` | `VehicleLocalPosition` | 50 Hz  | Bridge, Planner          |
+| `/fmu/out/vehicle_status`         | `VehicleStatus`        | 5 Hz   | Mission Manager          |
+| `/fmu/out/battery_status`         | `BatteryStatus`        | 1 Hz   | Mission Manager, Logging |
+| `/fmu/out/sensor_combined`        | `SensorCombined`       | 100 Hz | VIO (IMU source)         |
 
 **What we do not use in MVP:** GPS position topics (VIO is primary), vehicle_attitude (planner uses VIO pose directly), actuator outputs.
 
@@ -97,27 +97,27 @@ The `gz_x500` model provides:
 
 #### Inputs (subscribing from PX4 via uXRCE-DDS)
 
-| Topic | Type | Action |
-|-------|------|--------|
-| `/fmu/out/vehicle_local_position` | `px4_msgs/VehicleLocalPosition` | Transform NED→ENU; republish as `/aeroperception/vehicle_state` |
-| `/fmu/out/vehicle_status` | `px4_msgs/VehicleStatus` | Parse nav_state, arming_state; republish as `/aeroperception/flight_mode` |
-| `/fmu/out/battery_status` | `px4_msgs/BatteryStatus` | Pass through to `/aeroperception/battery` |
+| Topic                             | Type                            | Action                                                                    |
+| --------------------------------- | ------------------------------- | ------------------------------------------------------------------------- |
+| `/fmu/out/vehicle_local_position` | `px4_msgs/VehicleLocalPosition` | Transform NED→ENU; republish as `/aeroperception/vehicle_state`           |
+| `/fmu/out/vehicle_status`         | `px4_msgs/VehicleStatus`        | Parse nav_state, arming_state; republish as `/aeroperception/flight_mode` |
+| `/fmu/out/battery_status`         | `px4_msgs/BatteryStatus`        | Pass through to `/aeroperception/battery`                                 |
 
 #### Outputs (publishing to PX4 via uXRCE-DDS)
 
-| Topic | Type | Source | Rate |
-|-------|------|--------|------|
-| `/fmu/in/trajectory_setpoint` | `px4_msgs/TrajectorySetpoint` | Waypoint planner (via bridge) | 50 Hz |
-| `/fmu/in/offboard_control_mode` | `px4_msgs/OffboardControlMode` | Bridge heartbeat | 50 Hz |
-| `/fmu/in/vehicle_command` | `px4_msgs/VehicleCommand` | Mission manager (arm/mode) | On demand |
-| `/fmu/in/vehicle_visual_odometry` | `px4_msgs/VehicleOdometry` | VIO → bridge transform | 30 Hz |
+| Topic                             | Type                           | Source                        | Rate      |
+| --------------------------------- | ------------------------------ | ----------------------------- | --------- |
+| `/fmu/in/trajectory_setpoint`     | `px4_msgs/TrajectorySetpoint`  | Waypoint planner (via bridge) | 50 Hz     |
+| `/fmu/in/offboard_control_mode`   | `px4_msgs/OffboardControlMode` | Bridge heartbeat              | 50 Hz     |
+| `/fmu/in/vehicle_command`         | `px4_msgs/VehicleCommand`      | Mission manager (arm/mode)    | On demand |
+| `/fmu/in/vehicle_visual_odometry` | `px4_msgs/VehicleOdometry`     | VIO → bridge transform        | 30 Hz     |
 
 #### Services Provided
 
-| Service | Type | Description |
-|---------|------|-------------|
-| `/bridge/arm` | `aeroperception_interfaces/srv/ArmVehicle` | Send arm command to PX4 |
-| `/bridge/set_mode` | `aeroperception_interfaces/srv/SetFlightMode` | Switch PX4 flight mode |
+| Service            | Type                                          | Description             |
+| ------------------ | --------------------------------------------- | ----------------------- |
+| `/bridge/arm`      | `aeroperception_interfaces/srv/ArmVehicle`    | Send arm command to PX4 |
+| `/bridge/set_mode` | `aeroperception_interfaces/srv/SetFlightMode` | Switch PX4 flight mode  |
 
 #### Frame Transforms
 
@@ -138,11 +138,11 @@ The bridge maintains the 50 Hz `OffboardControlMode` publish regardless of wheth
 
 #### Failure Modes (MVP)
 
-| Failure | Detection | Action |
-|---------|-----------|--------|
-| XRCE Agent disconnects | Stale `/fmu/out/vehicle_status` > 500 ms | Log ERROR; transition to UNCONFIGURED lifecycle state; supervisor restarts |
-| Mode change rejected by PX4 | Service returns `success=false` | Log ERROR; Mission Manager FSM transitions to ERROR state |
-| VIO not available | `/state/visual_odometry` stale > 1 s | Do not inject VIO into PX4 EKF2; log WARN |
+| Failure                     | Detection                                | Action                                                                     |
+| --------------------------- | ---------------------------------------- | -------------------------------------------------------------------------- |
+| XRCE Agent disconnects      | Stale `/fmu/out/vehicle_status` > 500 ms | Log ERROR; transition to UNCONFIGURED lifecycle state; supervisor restarts |
+| Mode change rejected by PX4 | Service returns `success=false`          | Log ERROR; Mission Manager FSM transitions to ERROR state                  |
+| VIO not available           | `/state/visual_odometry` stale > 1 s     | Do not inject VIO into PX4 EKF2; log WARN                                  |
 
 ---
 
@@ -159,20 +159,20 @@ OpenVINS is launched as a ROS 2 component; its output topics are remapped to the
 
 #### Inputs
 
-| Topic | Type | Notes |
-|-------|------|-------|
-| `/camera/image_raw` | `sensor_msgs/Image` | Mono8 or RGB8, 30 Hz |
-| `/camera/camera_info` | `sensor_msgs/CameraInfo` | Latched, calibration |
-| `/imu/data` | `sensor_msgs/Imu` | 100–200 Hz; sourced from `/fmu/out/sensor_combined` via adapter |
+| Topic                 | Type                     | Notes                                                           |
+| --------------------- | ------------------------ | --------------------------------------------------------------- |
+| `/camera/image_raw`   | `sensor_msgs/Image`      | Mono8 or RGB8, 30 Hz                                            |
+| `/camera/camera_info` | `sensor_msgs/CameraInfo` | Latched, calibration                                            |
+| `/imu/data`           | `sensor_msgs/Imu`        | 100–200 Hz; sourced from `/fmu/out/sensor_combined` via adapter |
 
 **IMU adapter node:** A thin node converts `px4_msgs/SensorCombined` → `sensor_msgs/Imu` with proper header stamps and frame_id. Lives in `aeroperception_bridge`.
 
 #### Outputs
 
-| Topic | Type | Rate | Notes |
-|-------|------|------|-------|
-| `/state/visual_odometry` | `nav_msgs/Odometry` | 30–50 Hz | ENU frame, `frame_id: "odom"`, `child_frame_id: "base_link"` |
-| `/state/vio_health` | `diagnostic_msgs/DiagnosticStatus` | 1 Hz | TRACKING / LOST / INITIALIZING |
+| Topic                    | Type                               | Rate     | Notes                                                        |
+| ------------------------ | ---------------------------------- | -------- | ------------------------------------------------------------ |
+| `/state/visual_odometry` | `nav_msgs/Odometry`                | 30–50 Hz | ENU frame, `frame_id: "odom"`, `child_frame_id: "base_link"` |
+| `/state/vio_health`      | `diagnostic_msgs/DiagnosticStatus` | 1 Hz     | TRACKING / LOST / INITIALIZING                               |
 
 #### OpenVINS Configuration Essentials
 
@@ -224,16 +224,16 @@ If `vio_health` transitions to LOST during a mission:
 
 #### Inputs
 
-| Topic | Type | Notes |
-|-------|------|-------|
+| Topic               | Type                | Notes                                                 |
+| ------------------- | ------------------- | ----------------------------------------------------- |
 | `/camera/image_raw` | `sensor_msgs/Image` | Subscribed at 10 Hz max (detector rate-limits itself) |
 
 #### Outputs
 
-| Topic | Type | Rate | Notes |
-|-------|------|------|-------|
-| `/perception/detections` | `vision_msgs/Detection2DArray` | ≤10 Hz | Bounding boxes, class labels, confidence scores |
-| `/perception/detector_health` | `diagnostic_msgs/DiagnosticStatus` | 1 Hz | OK / WARN (slow inference) / ERROR (model load fail) |
+| Topic                         | Type                               | Rate   | Notes                                                |
+| ----------------------------- | ---------------------------------- | ------ | ---------------------------------------------------- |
+| `/perception/detections`      | `vision_msgs/Detection2DArray`     | ≤10 Hz | Bounding boxes, class labels, confidence scores      |
+| `/perception/detector_health` | `diagnostic_msgs/DiagnosticStatus` | 1 Hz   | OK / WARN (slow inference) / ERROR (model load fail) |
 
 #### Model Configuration
 
@@ -302,31 +302,31 @@ The Mission Manager is the only node that calls bridge services. Everything else
               └──────── land cmd ──── RTL cmd
 ```
 
-| State | Entry Condition | Behavior | Exit Condition |
-|-------|----------------|----------|---------------|
-| IDLE | Startup; or post-land | No setpoints published | Operator arm + takeoff command |
-| TAKEOFF | Arm confirmed; takeoff commanded | Fly to takeoff altitude (default: 3 m); wait for VIO | VIO healthy + altitude reached |
-| EXECUTING | VIO healthy; goals loaded | Feed waypoints to planner | All waypoints reached, or HOLD command, or failure |
-| HOLDING | Perception degraded, or operator command, or link loss | Zero-velocity setpoint to planner; wait | Recovery confirmed, or LAND command |
-| LAND | Land commanded or RTL complete | Command land altitude | Landed confirmed by `vehicle_status.landed_state` |
+| State     | Entry Condition                                        | Behavior                                             | Exit Condition                                     |
+| --------- | ------------------------------------------------------ | ---------------------------------------------------- | -------------------------------------------------- |
+| IDLE      | Startup; or post-land                                  | No setpoints published                               | Operator arm + takeoff command                     |
+| TAKEOFF   | Arm confirmed; takeoff commanded                       | Fly to takeoff altitude (default: 3 m); wait for VIO | VIO healthy + altitude reached                     |
+| EXECUTING | VIO healthy; goals loaded                              | Feed waypoints to planner                            | All waypoints reached, or HOLD command, or failure |
+| HOLDING   | Perception degraded, or operator command, or link loss | Zero-velocity setpoint to planner; wait              | Recovery confirmed, or LAND command                |
+| LAND      | Land commanded or RTL complete                         | Command land altitude                                | Landed confirmed by `vehicle_status.landed_state`  |
 
 #### Inputs
 
-| Topic / Service | Type | Notes |
-|----------------|------|-------|
-| `/aeroperception/vehicle_state` | `VehicleStateENU` | Current pose, mode, arming state |
-| `/aeroperception/flight_mode` | `std_msgs/String` | Current PX4 nav_state |
-| `/perception/health` | `PerceptionHealth` | Gate EXECUTING state |
-| `/operator/command` | `MissionCommand` | Arm, takeoff, load mission, start, hold, land |
+| Topic / Service                 | Type               | Notes                                         |
+| ------------------------------- | ------------------ | --------------------------------------------- |
+| `/aeroperception/vehicle_state` | `VehicleStateENU`  | Current pose, mode, arming state              |
+| `/aeroperception/flight_mode`   | `std_msgs/String`  | Current PX4 nav_state                         |
+| `/perception/health`            | `PerceptionHealth` | Gate EXECUTING state                          |
+| `/operator/command`             | `MissionCommand`   | Arm, takeoff, load mission, start, hold, land |
 
 #### Outputs
 
-| Topic / Service | Type | Notes |
-|----------------|------|-------|
-| `/mission/active_goal` | `geometry_msgs/PoseStamped` | Current target for planner |
-| `/mission/status` | `MissionStatus` | Published at 2 Hz; logged and telemetered |
-| `/bridge/arm` | Service call | Via service client |
-| `/bridge/set_mode` | Service call | Via service client |
+| Topic / Service        | Type                        | Notes                                     |
+| ---------------------- | --------------------------- | ----------------------------------------- |
+| `/mission/active_goal` | `geometry_msgs/PoseStamped` | Current target for planner                |
+| `/mission/status`      | `MissionStatus`             | Published at 2 Hz; logged and telemetered |
+| `/bridge/arm`          | Service call                | Via service client                        |
+| `/bridge/set_mode`     | Service call                | Via service client                        |
 
 #### Mission Format (MVP)
 
@@ -385,17 +385,17 @@ This is a P-controller on position error, implemented as a velocity setpoint. PX
 
 #### Inputs
 
-| Topic | Type | Rate |
-|-------|------|------|
-| `/aeroperception/vehicle_state` | `VehicleStateENU` | 50 Hz |
-| `/mission/active_goal` | `geometry_msgs/PoseStamped` | On change |
+| Topic                           | Type                        | Rate      |
+| ------------------------------- | --------------------------- | --------- |
+| `/aeroperception/vehicle_state` | `VehicleStateENU`           | 50 Hz     |
+| `/mission/active_goal`          | `geometry_msgs/PoseStamped` | On change |
 
 #### Outputs
 
-| Topic | Type | Rate |
-|-------|------|------|
-| `/fmu/in/trajectory_setpoint` | `px4_msgs/TrajectorySetpoint` | 50 Hz (always, even in HOLD) |
-| `/fmu/in/offboard_control_mode` | `px4_msgs/OffboardControlMode` | 50 Hz (heartbeat) |
+| Topic                           | Type                           | Rate                         |
+| ------------------------------- | ------------------------------ | ---------------------------- |
+| `/fmu/in/trajectory_setpoint`   | `px4_msgs/TrajectorySetpoint`  | 50 Hz (always, even in HOLD) |
+| `/fmu/in/offboard_control_mode` | `px4_msgs/OffboardControlMode` | 50 Hz (heartbeat)            |
 
 #### Growth Hook
 
@@ -554,18 +554,18 @@ string error_message
 
 Complete inventory of all ROS 2 nodes in the MVP stack.
 
-| Node | Package | Language | Rate | Purpose |
-|------|---------|----------|------|---------|
-| `bridge_node` | `aeroperception_bridge` | C++ | 50 Hz | FC↔ROS 2 translation, frame transforms |
-| `imu_adapter_node` | `aeroperception_bridge` | C++ | 200 Hz | SensorCombined → sensor_msgs/Imu |
-| `vio_node` | `aeroperception_perception` | C++ (OpenVINS) | 30–50 Hz | Visual-Inertial Odometry |
-| `detector_node` | `aeroperception_perception` | Python | ≤10 Hz | YOLOv8-nano object detection |
-| `perception_coordinator_node` | `aeroperception_perception` | Python | 1 Hz | Health aggregator |
-| `mission_manager_node` | `aeroperception_planning` | Python | 2–10 Hz | 5-state FSM, mission execution |
-| `waypoint_planner_node` | `aeroperception_planning` | C++ | 50 Hz | Setpoint generation |
-| `gz_camera_bridge` | (ros_gz_bridge, configured) | — | 30 Hz | Gazebo camera → ROS 2 |
-| `diagnostic_aggregator` | (standard package) | — | 1 Hz | Roll up /diagnostics |
-| `rosbag2_recorder` | (standard package, configured) | — | — | Record essentials preset |
+| Node                          | Package                        | Language       | Rate     | Purpose                                |
+| ----------------------------- | ------------------------------ | -------------- | -------- | -------------------------------------- |
+| `bridge_node`                 | `aeroperception_bridge`        | C++            | 50 Hz    | FC↔ROS 2 translation, frame transforms |
+| `imu_adapter_node`            | `aeroperception_bridge`        | C++            | 200 Hz   | SensorCombined → sensor_msgs/Imu       |
+| `vio_node`                    | `aeroperception_perception`    | C++ (OpenVINS) | 30–50 Hz | Visual-Inertial Odometry               |
+| `detector_node`               | `aeroperception_perception`    | Python         | ≤10 Hz   | YOLOv8-nano object detection           |
+| `perception_coordinator_node` | `aeroperception_perception`    | Python         | 1 Hz     | Health aggregator                      |
+| `mission_manager_node`        | `aeroperception_planning`      | Python         | 2–10 Hz  | 5-state FSM, mission execution         |
+| `waypoint_planner_node`       | `aeroperception_planning`      | C++            | 50 Hz    | Setpoint generation                    |
+| `gz_camera_bridge`            | (ros_gz_bridge, configured)    | —              | 30 Hz    | Gazebo camera → ROS 2                  |
+| `diagnostic_aggregator`       | (standard package)             | —              | 1 Hz     | Roll up /diagnostics                   |
+| `rosbag2_recorder`            | (standard package, configured) | —              | —        | Record essentials preset               |
 
 **Process note:** For MVP, each node runs as a separate process. If latency on the hot path (bridge → planner → bridge) exceeds 20 ms during development, migrate bridge + planner to a single component container.
 

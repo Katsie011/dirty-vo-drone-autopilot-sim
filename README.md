@@ -59,6 +59,10 @@ This project aims to rebuild and modernize a monocular perception pipeline (orig
 
 ## Getting Started
 
+1. Make sure you install the [hello sky simulation environment](https://docs.px4.io/main/en/dev_setup/dev_env_mac) from PX4
+
+
+
 1. Install required dependencies (ROS 2, PX4 SITL, Gazebo/Ignition).
 2. Build PX4 and ROS 2 workspaces.
 3. Launch simulation with:
