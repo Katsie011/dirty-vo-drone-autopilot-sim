@@ -1,0 +1,60 @@
+argcomplete==3.6.3
+attrs @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_attrs_1764875182/work
+blinker==1.9.0
+Cerberus==1.3.8
+certifi==2026.1.4
+charset-normalizer==3.4.4
+click==8.3.1
+contourpy==1.3.3
+coverage==7.13.4
+cycler==0.12.1
+Empty==0.4.4
+empy==3.3.4
+fastcrc==0.3.5
+Flask==3.1.2
+fonttools==4.61.1
+future @ file:///home/conda/feedstock_root/build_artifacts/future_1738926421307/work
+grpcio==1.78.0
+idna==3.11
+importlib_resources==6.5.2
+itsdangerous==2.2.0
+Jinja2 @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_jinja2_1764517220/work
+jsonschema @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_jsonschema_1767839954/work
+jsonschema-specifications @ file:///tmp/tmptzik3dqa/src
+kconfiglib==14.1.0
+kiwisolver==1.4.9
+lark==1.3.1
+lxml==6.0.2
+MarkupSafe @ file:///Users/runner/miniforge3/conda-bld/markupsafe_1759055271810/work
+matplotlib==3.10.8
+mavsdk==3.15.3
+mpmath==1.3.0
+numpy @ file:///Users/runner/miniforge3/conda-bld/bld/rattler-build_numpy_1770098439/work/dist/numpy-2.4.2-cp313-cp313-macosx_11_0_arm64.whl#sha256=729c7025260a6af1891b79c2c21a3314ffaeb2a7e80a45f7f82b55bc81e8f49a
+nunavut==2.3.1
+packaging @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_packaging_1769093650/work
+pandas @ file:///Users/runner/miniforge3/conda-bld/bld/rattler-build_pandas_1769076505/work
+pillow==12.1.1
+pkgconfig==1.5.5
+protobuf==6.33.5
+psutil==7.2.2
+pycryptodome==3.23.0
+pydsdl==1.24.3
+Pygments==2.19.2
+pymavlink==2.4.49
+pyparsing==3.3.2
+pyros-genmsg==0.5.8
+pyserial @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_pyserial_1767289527/work
+python-dateutil @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_python-dateutil_1751104122/work
+pyulog==1.2.2
+PyYAML @ file:///Users/runner/miniforge3/conda-bld/pyyaml_1770223448612/work
+referencing @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_referencing_1760379115/work
+requests==2.32.5
+rpds-py @ file:///Users/runner/miniforge3/conda-bld/bld/rattler-build_rpds-py_1764543165/work
+setuptools==82.0.0
+six @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_six_1753199211/work
+sympy==1.14.0
+toml @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_toml_1764486833/work
+typing_extensions @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_typing_extensions_1756220668/work
+urllib3==2.6.3
+Werkzeug==3.1.5
+wheel==0.46.3
