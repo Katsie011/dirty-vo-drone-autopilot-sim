@@ -1,727 +1,436 @@
 #!/usr/bin/env python3
 """
-AeroPerception — Visual Odometry Demo
-======================================
+AeroPerception — Visual Odometry Demo  v2
+==========================================
 Run with:
-    python main.py                  # uses default webcam
-    python main.py --source 1       # alternate camera index
+    python main.py                   # default webcam
+    python main.py --source 1        # external webcam
     python main.py --source video.mp4
 
 Controls:
-    R — reset pose to origin
-    D — toggle detections on/off
-    F — toggle feature points on/off
-    S — save snapshot
-    Q / ESC — quit
+    R — reset pose  |  D — detections  |  F — features
+    S — snapshot    |  Q / ESC — quit
 
-What this demonstrates:
-    • Lucas-Kanade sparse optical flow tracking
-    • Monocular VO producing a 2D trajectory (x/y ground plane)
-    • YOLOv8-nano object detection running on a background thread
-    • Live telemetry overlay
+Tuning flags (useful when calibrating):
+    --scale N       larger → bigger movements on map (default 0.08)
+    --min-disp N    larger → harder to trigger motion (default 0.8 px)
+    --no-detector   skip YOLOv8 for faster startup
 
-This is Phase 2 of the AeroPerception MVP. No ROS 2, no autopilot, no
-compilation required. It is the perception loop in isolation — the piece
-that will be wrapped as a ROS 2 node and connected to the drone bridge
-in Phase 3.
+v2 bug-fixes vs v1:
+  BUG 1 — Pose updated unconditionally even when stationary.
+           Fixed: median pixel displacement gate; if Δpx < MIN_PIXEL_DISP,
+           skip the pose update entirely (primary jitter fix).
+  BUG 2 — Yaw extracted via atan2(R[1,0],R[0,0]) which conflates pitch/roll
+           into the yaw estimate.
+           Fixed: Rodrigues decomposition → z-axis component only.
+  BUG 3 — recoverPose received ALL tracked points, not just RANSAC inliers.
+           Fixed: apply e_mask from findEssentialMat before recoverPose.
+  BUG 4 — Trajectory point appended before quality/inlier check.
+           Fixed: append only after confirmed motion.
+  NEW  — Bidirectional LK consistency check removes unreliable correspondences.
+  NEW  — Gaussian pre-blur reduces pixel noise before feature detection.
+  NEW  — EMA applied to *displayed* pose only (smooths render, not trajectory).
+  NEW  — --scale and --min-disp CLI flags for interactive tuning.
 
-Dependencies:
-    pip install opencv-python numpy ultralytics
+Dependencies:  pip install opencv-python numpy ultralytics
 """
 
 import argparse
-import sys
-import time
 import math
+import queue
+import sys
+import threading
+import time
 import warnings
-from pathlib import Path
 from typing import Optional
 
 import cv2
 import numpy as np
 
-from config import Config
-from obj_detector import DetectorThread
-
-
-# Suppress ultralytics output spam
 warnings.filterwarnings("ignore")
 
+from config import Config
+from obj_detector import DetectorThread
+from visualizer import Visualiser
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # VISUAL ODOMETRY
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class VisualOdometry:
     """
-    Monocular Visual Odometry using Lucas-Kanade sparse optical flow.
+    Monocular VO: Lucas-Kanade optical flow → Essential Matrix → pose.
 
-    Produces a 2D trajectory estimate in the x-y plane (ground plane
-    approximation) plus a yaw estimate. Z is held at ASSUMED_HEIGHT_M
-    since we have no barometer on the laptop webcam.
-
-    This is deliberately simple — it is not production VO. It is the
-    minimal implementation that proves the perception→control loop can
-    work. It will be replaced by OpenVINS on hardware.
+    Internal pose  (_x, _y, _yaw)  accumulates only on confirmed motion.
+    Displayed pose (x, y, yaw)     is EMA-smoothed for clean rendering.
     """
 
     STATUS_INITIALIZING = "INITIALIZING"
-    STATUS_HEALTHY      = "HEALTHY"
-    STATUS_DEGRADED     = "DEGRADED"
-    STATUS_LOST         = "LOST"
+    STATUS_STATIONARY = "STATIONARY"
+    STATUS_HEALTHY = "HEALTHY"
+    STATUS_DEGRADED = "DEGRADED"
+    STATUS_LOST = "LOST"
 
-    def __init__(self, camera_matrix: np.ndarray):
-        self.K = camera_matrix
-        self.inv_K = np.linalg.inv(camera_matrix)
+    def __init__(self, K: np.ndarray):
+        self.K = K
+        self.inv_K = np.linalg.inv(K)
 
-        # LK parameters
         self._lk_params = dict(
             winSize=Config.LK_WIN_SIZE,
             maxLevel=Config.LK_MAX_LEVEL,
-            criteria=(
-                cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT,
-                30, 0.01
-            )
+            criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 30, 0.01),
         )
         self._feat_params = dict(
             maxCorners=Config.LK_MAX_CORNERS,
             qualityLevel=Config.LK_QUALITY,
             minDistance=Config.LK_MIN_DISTANCE,
-            blockSize=3
+            blockSize=3,
         )
 
-        # State
-        self._prev_gray: Optional[np.ndarray] = None
-        self._prev_pts:  Optional[np.ndarray] = None
+        # Internal integrated pose
+        self._x = 0.0
+        self._y = 0.0
+        self._yaw = 0.0
 
-        # Accumulated pose (ENU: x=East, y=North, z=Up)
-        self.x   = 0.0
-        self.y   = 0.0
-        self.z   = Config.ASSUMED_HEIGHT_M
-        self.yaw = 0.0
-
-        # Diagnostics
-        self.status            = self.STATUS_INITIALIZING
-        self.tracking_quality  = 0.0     # 0–1
-        self.num_features      = 0
-        self.frame_count       = 0
-
-        # Trajectory history (for plotting)
-        self.trajectory: list[tuple[float, float]] = [(0.0, 0.0)]
-        self._max_traj_len = 2000
-
-    # ------------------------------------------------------------------
-    def reset(self):
-        """Reset pose to origin (press R)."""
+        # Displayed (EMA-smoothed) pose — these are what the UI reads
         self.x = 0.0
         self.y = 0.0
+        self.z = Config.ASSUMED_HEIGHT_M
         self.yaw = 0.0
+
+        self._prev_gray: Optional[np.ndarray] = None
+        self._prev_pts: Optional[np.ndarray] = None
+
+        self.status = self.STATUS_INITIALIZING
+        self.tracking_quality = 0.0
+        self.num_features = 0
+        self.pixel_disp = 0.0
+        self.frame_count = 0
+
+        self.trajectory: list[tuple[float, float]] = [(0.0, 0.0)]
+
+    # ─────────────────────────────────────────────────────────────────
+    def reset(self):
+        self._x = self._y = self._yaw = 0.0
+        self.x = self.y = self.yaw = 0.0
         self.trajectory = [(0.0, 0.0)]
         self._prev_gray = None
-        self._prev_pts  = None
+        self._prev_pts = None
         self.status = self.STATUS_INITIALIZING
+        self.pixel_disp = 0.0
 
-    # ------------------------------------------------------------------
+    # ─────────────────────────────────────────────────────────────────
     def update(self, frame: np.ndarray) -> dict:
-        """
-        Process one frame. Returns current pose estimate.
-        Should be called at camera rate (≤60 Hz).
-        """
         self.frame_count += 1
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-        # ── Initialise / reinitialise feature set ──────────────────────
+        # Pre-blur to reduce sensor noise before tracking
+        blurred = cv2.GaussianBlur(frame, Config.BLUR_KERNEL, 0)
+        gray = cv2.cvtColor(blurred, cv2.COLOR_BGR2GRAY)
+
+        # ── Init / reinit feature set ──────────────────────────────
         needs_init = (
             self._prev_gray is None
             or self._prev_pts is None
             or len(self._prev_pts) < Config.MIN_FEATURES
         )
         if needs_init:
-            self._prev_pts  = self._detect_features(gray)
+            self._prev_pts = self._detect(gray)
             self._prev_gray = gray
             self.status = self.STATUS_INITIALIZING
             self.num_features = 0 if self._prev_pts is None else len(self._prev_pts)
-            return self._pose_dict(good_new=None)
+            self.pixel_disp = 0.0
+            return self._make_pose(viz_pts=None)
 
-        # ── Track features ──────────────────────────────────────────────
-        next_pts, st, _ = cv2.calcOpticalFlowPyrLK(
+        # ── Forward LK track ───────────────────────────────────────
+        next_pts, st_fwd, _ = cv2.calcOpticalFlowPyrLK(
             self._prev_gray, gray, self._prev_pts, None, **self._lk_params
         )
 
-        good_new = next_pts[st == 1]
-        good_old = self._prev_pts[st == 1]
+        # ── Backward LK check (bidirectional consistency) ──────────
+        # Tracks points *back* from the new frame to the old frame.
+        # If a point doesn't round-trip cleanly, it's unreliable — reject it.
+        back_pts, st_bwd, _ = cv2.calcOpticalFlowPyrLK(
+            gray, self._prev_gray, next_pts, None, **self._lk_params
+        )
+        fb_err = np.linalg.norm(
+            self._prev_pts.reshape(-1, 2) - back_pts.reshape(-1, 2), axis=1
+        )
+        valid = (
+            (st_fwd.reshape(-1) == 1)
+            & (st_bwd.reshape(-1) == 1)
+            & (fb_err < Config.FB_CHECK_THRESHOLD)
+        )
+        good_new = next_pts.reshape(-1, 2)[valid]
+        good_old = self._prev_pts.reshape(-1, 2)[valid]
 
-        total = max(len(self._prev_pts), 1)
-        self.tracking_quality = len(good_new) / total
-        self.num_features     = len(good_new)
+        self.tracking_quality = len(good_new) / max(len(self._prev_pts), 1)
+        self.num_features = len(good_new)
 
-        # ── Quality check ────────────────────────────────────────────────
         if len(good_new) < Config.MIN_FEATURES:
-            self._prev_pts  = None   # will reinit next frame
+            self._prev_pts = None
             self.status = self.STATUS_LOST
-            return self._pose_dict(good_new=None)
+            self.pixel_disp = 0.0
+            return self._make_pose(viz_pts=None)
 
-        # ── Estimate motion via Essential Matrix ────────────────────────
+        # ── Stillness gate — PRIMARY JITTER FIX ───────────────────
+        # Median pixel displacement tells us how much the scene actually moved.
+        # Sub-pixel noise should NOT produce trajectory movement.
+        displacements = np.linalg.norm(good_new - good_old, axis=1)
+        self.pixel_disp = float(np.median(displacements))
+
+        if self.pixel_disp < Config.MIN_PIXEL_DISP:
+            # Camera is not moving — hold pose, just update tracking
+            self._prev_gray = gray
+            self._prev_pts = good_new.reshape(-1, 1, 2)
+            self.status = self.STATUS_STATIONARY
+            self._ema()
+            return self._make_pose(viz_pts=good_new)
+
+        # ── Essential matrix (RANSAC) ──────────────────────────────
         try:
-            E, mask = cv2.findEssentialMat(
-                good_new, good_old, self.K,
-                method=cv2.RANSAC, prob=0.999, threshold=1.0
+            E, e_mask = cv2.findEssentialMat(
+                good_new,
+                good_old,
+                self.K,
+                method=cv2.RANSAC,
+                prob=0.999,
+                threshold=1.0,
             )
             if E is None or E.shape != (3, 3):
-                raise ValueError("Bad E matrix")
+                raise ValueError("Degenerate E matrix")
 
-            _, R, t, inlier_mask = cv2.recoverPose(E, good_new, good_old, self.K)
+            # BUG FIX: apply RANSAC inlier mask BEFORE recoverPose
+            mask_flat = e_mask.ravel().astype(bool)
+            inlier_new = good_new[mask_flat]
+            inlier_old = good_old[mask_flat]
+            inlier_ratio = len(inlier_new) / max(len(good_new), 1)
 
-            # Inlier ratio
-            inlier_ratio = float(np.sum(inlier_mask)) / max(len(good_new), 1)
+            if inlier_ratio < Config.MIN_INLIER_RATIO or len(inlier_new) < 8:
+                raise ValueError(f"Inlier ratio too low: {inlier_ratio:.2f}")
+
+            _, R, t, _ = cv2.recoverPose(E, inlier_new, inlier_old, self.K)
 
         except (cv2.error, ValueError):
             self.status = self.STATUS_DEGRADED
             self._prev_gray = gray
-            self._prev_pts  = good_new.reshape(-1, 1, 2)
-            return self._pose_dict(good_new=good_new)
+            self._prev_pts = good_new.reshape(-1, 1, 2)
+            self._ema()
+            return self._make_pose(viz_pts=good_new)
 
-        # ── Scale recovery (height heuristic) ───────────────────────────
-        # recoverPose returns unit translation. We scale by assumed height.
-        # On the real vehicle this is replaced by barometer or GPS altitude.
-        t_norm = float(np.linalg.norm(t))
-        if t_norm > 1e-6:
-            scale = Config.ASSUMED_HEIGHT_M * 0.05   # conservative scale factor
-        else:
-            scale = 0.0
+        # ── Yaw extraction — BUG FIX ──────────────────────────────
+        # v1 used atan2(R[1,0], R[0,0]) which extracts the *full planar*
+        # rotation including pitch/roll components → corrupted yaw.
+        # Rodrigues gives us the rotation *vector*; its z-component is
+        # the around-camera-axis rotation (our proxy for yaw).
+        rvec, _ = cv2.Rodrigues(R)
+        yaw_delta = float(rvec[2, 0])
+        # Clamp: more than ~8° per frame at 30fps is almost certainly noise
+        yaw_delta = float(np.clip(yaw_delta, -0.15, 0.15))
 
-        # ── Update pose ─────────────────────────────────────────────────
-        # Extract yaw from rotation (small angle approx)
-        yaw_delta = math.atan2(float(R[1, 0]), float(R[0, 0]))
-        self.yaw += yaw_delta
+        # ── Scale → metres ─────────────────────────────────────────
+        # Scale is proportional to pixel displacement, saturating at 5px.
+        # This means sub-threshold noise produces near-zero position change.
+        motion_ratio = min(self.pixel_disp / 5.0, 1.0)
+        effective_scale = Config.ASSUMED_HEIGHT_M * Config.SCALE_FACTOR * motion_ratio
 
-        # Rotate translation into world frame
-        cos_y = math.cos(self.yaw)
-        sin_y = math.sin(self.yaw)
-        # print(f"T has shape:{t.shape}")
-        dx =  scale * (cos_y * float(t[0, 0]) - sin_y * float(t[1, 0]))
-        dy =  scale * (sin_y * float(t[0, 0]) + cos_y * float(t[1, 0]))
+        if np.linalg.norm(t) < 1e-8:
+            effective_scale = 0.0
 
-        self.x += dx
-        self.y += dy
+        # ── Integrate pose ─────────────────────────────────────────
+        self._yaw += yaw_delta
+        cos_y = math.cos(self._yaw)
+        sin_y = math.sin(self._yaw)
+        tx, ty = float(t[0, 0]), float(t[1, 0])
+        self._x += effective_scale * (cos_y * tx - sin_y * ty)
+        self._y += effective_scale * (sin_y * tx + cos_y * ty)
 
-        # Record trajectory
-        self.trajectory.append((self.x, self.y))
-        if len(self.trajectory) > self._max_traj_len:
+        # Append to trajectory only when we actually moved
+        self.trajectory.append((self._x, self._y))
+        if len(self.trajectory) > 2000:
             self.trajectory.pop(0)
 
-        # ── Refresh features ─────────────────────────────────────────────
+        # ── Refresh feature set if degraded ───────────────────────
         if self.tracking_quality < Config.REINIT_THRESHOLD:
-            new_pts = self._detect_features(gray)
+            new_pts = self._detect(gray)
             if new_pts is not None and len(new_pts) > 0:
-                self._prev_pts = np.vstack([
-                    good_new.reshape(-1, 1, 2),
-                    new_pts
-                ])[:Config.LK_MAX_CORNERS]
+                self._prev_pts = np.vstack([good_new.reshape(-1, 1, 2), new_pts])[
+                    : Config.LK_MAX_CORNERS
+                ]
+            else:
+                self._prev_pts = good_new.reshape(-1, 1, 2)
         else:
             self._prev_pts = good_new.reshape(-1, 1, 2)
 
         self._prev_gray = gray
-
         self.status = (
-            self.STATUS_HEALTHY  if inlier_ratio > 0.6
-            else self.STATUS_DEGRADED
+            self.STATUS_HEALTHY if inlier_ratio > 0.65 else self.STATUS_DEGRADED
         )
+        self._ema()
+        return self._make_pose(viz_pts=good_new)
 
-        return self._pose_dict(good_new=good_new)
+    # ─────────────────────────────────────────────────────────────────
+    def _ema(self):
+        """Apply EMA to displayed pose. Smooths rendering only."""
+        a = Config.POSE_EMA_ALPHA
+        self.x = a * self.x + (1 - a) * self._x
+        self.y = a * self.y + (1 - a) * self._y
+        self.yaw = a * self.yaw + (1 - a) * self._yaw
 
-    # ------------------------------------------------------------------
-    def _detect_features(self, gray: np.ndarray) -> Optional[np.ndarray]:
-        pts = cv2.goodFeaturesToTrack(gray, **self._feat_params)
-        return pts
+    def _detect(self, gray: np.ndarray) -> Optional[np.ndarray]:
+        return cv2.goodFeaturesToTrack(gray, **self._feat_params)
 
-    def _pose_dict(self, good_new) -> dict:
+    def _make_pose(self, viz_pts) -> dict:
         return {
-            "x":               self.x,
-            "y":               self.y,
-            "z":               self.z,
-            "yaw_deg":         math.degrees(self.yaw),
+            "x": self.x,
+            "y": self.y,
+            "z": self.z,
+            "yaw_deg": math.degrees(self.yaw),
             "tracking_quality": self.tracking_quality,
-            "num_features":    self.num_features,
-            "status":          self.status,
-            "tracked_points":  good_new,
+            "num_features": self.num_features,
+            "status": self.status,
+            "pixel_disp": self.pixel_disp,
+            "tracked_points": viz_pts,
         }
-
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CAMERA INTRINSICS
 # ─────────────────────────────────────────────────────────────────────────────
 
-def estimate_camera_matrix(width: int, height: int) -> np.ndarray:
-    """
-    Estimate camera intrinsics from image dimensions.
 
-    A proper calibration (using a checkerboard + cv2.calibrateCamera) will
-    give better VO results. For the demo, a standard approximation works.
-
-    Typical MacBook webcam: ~70° horizontal FOV.
-    """
-    fov_h_deg = 70.0
-    fov_h_rad = math.radians(fov_h_deg)
-    fx = (width / 2.0) / math.tan(fov_h_rad / 2.0)
-    fy = fx  # square pixels assumed
-    cx = width  / 2.0
-    cy = height / 2.0
-    return np.array([
-        [fx,  0, cx],
-        [ 0, fy, cy],
-        [ 0,  0,  1]
-    ], dtype=np.float64)
+def estimate_K(w: int, h: int) -> np.ndarray:
+    fx = (w / 2.0) / math.tan(math.radians(70.0) / 2.0)
+    return np.array([[fx, 0, w / 2.0], [0, fx, h / 2.0], [0, 0, 1.0]], dtype=np.float64)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# VISUALISER
+# MAIN
 # ─────────────────────────────────────────────────────────────────────────────
 
-class Visualiser:
-    """
-    Composes the display frame from the camera feed + overlays + telemetry.
-
-    Layout:
-    ┌──────────────────────────┬─────────────────┐
-    │  Camera feed             │  Trajectory map │
-    │  + feature points        │  (top-down)     │
-    │  + detections            │                 │
-    ├──────────────────────────┴─────────────────┤
-    │  Telemetry bar                              │
-    └─────────────────────────────────────────────┘
-    """
-
-    TELEMETRY_H = 80
-    TRAJ_W = Config.TRAJ_SIZE
-    TRAJ_H = Config.TRAJ_SIZE
-
-    def __init__(self, frame_w: int, frame_h: int):
-        self._fw = frame_w
-        self._fh = frame_h
-
-        # Scale factor to fit camera into left panel
-        total_w      = Config.VIZ_WIDTH
-        left_w       = total_w - self.TRAJ_W
-        self._scale  = min(left_w / frame_w, Config.VIZ_HEIGHT / frame_h)
-        self._disp_w = int(frame_w * self._scale)
-        self._disp_h = int(frame_h * self._scale)
-
-        self._canvas_w = self._disp_w + self.TRAJ_W
-        self._canvas_h = self._disp_h + self.TELEMETRY_H
-
-        # Font
-        self._font      = cv2.FONT_HERSHEY_SIMPLEX
-        self._font_mono = cv2.FONT_HERSHEY_PLAIN
-
-        # FPS tracking
-        self._fps_times: list[float] = []
-
-    # ------------------------------------------------------------------
-    def render(
-        self,
-        frame:      np.ndarray,
-        pose:       dict,
-        detections: list,
-        show_feats: bool,
-        show_dets:  bool,
-        traj:       list,
-        frame_idx:  int,
-    ) -> np.ndarray:
-        """Build and return the full display frame."""
-        canvas = np.full(
-            (self._canvas_h, self._canvas_w, 3),
-            Config.COL_BG, dtype=np.uint8
-        )
-
-        # ── Camera panel ──────────────────────────────────────────────
-        cam = cv2.resize(frame, (self._disp_w, self._disp_h))
-
-        # Feature points overlay
-        if show_feats and pose["tracked_points"] is not None:
-            pts = pose["tracked_points"]
-            for pt in pts:
-                px = int(pt[0] * self._scale)
-                py = int(pt[1] * self._scale)
-                cv2.circle(cam, (px, py), 3, Config.COL_GREEN, -1)
-                cv2.circle(cam, (px, py), 5, Config.COL_GREEN,  1)
-
-        # Detection bounding boxes
-        if show_dets:
-            scale_x = self._disp_w / self._fw
-            scale_y = self._disp_h / self._fh
-            for det in detections:
-                x1, y1, x2, y2 = det["bbox"]
-                x1 = int(x1 * scale_x); y1 = int(y1 * scale_y)
-                x2 = int(x2 * scale_x); y2 = int(y2 * scale_y)
-                cv2.rectangle(cam, (x1, y1), (x2, y2), Config.COL_ORANGE, 2)
-                label = f"{det['label']} {det['conf']:.0%}"
-                lw, lh = self._text_size(label, 0.55, 1)
-                cv2.rectangle(cam, (x1, y1 - lh - 6), (x1 + lw + 6, y1),
-                              Config.COL_ORANGE, -1)
-                cv2.putText(cam, label, (x1 + 3, y1 - 4),
-                            self._font, 0.55, Config.COL_BG, 1, cv2.LINE_AA)
-
-        # Status chip
-        status   = pose["status"]
-        stat_col = {
-            "HEALTHY":     Config.COL_GREEN,
-            "DEGRADED":    Config.COL_ORANGE,
-            "LOST":        Config.COL_RED,
-            "INITIALIZING": Config.COL_GREY,
-        }.get(status, Config.COL_GREY)
-
-        self._chip(cam, status, (12, 12), stat_col)
-
-        canvas[:self._disp_h, :self._disp_w] = cam
-
-        # ── Trajectory panel ──────────────────────────────────────────
-        traj_panel = self._draw_trajectory(traj, pose)
-        canvas[:self.TRAJ_H, self._disp_w:self._disp_w + self.TRAJ_W] = traj_panel
-
-        # ── Telemetry bar ──────────────────────────────────────────────
-        tele_y = self._disp_h
-        self._draw_telemetry(canvas, tele_y, pose, frame_idx)
-
-        return canvas
-
-    # ------------------------------------------------------------------
-    def _draw_trajectory(self, traj: list, pose: dict) -> np.ndarray:
-        """Top-down trajectory plot."""
-        panel = np.full((self.TRAJ_H, self.TRAJ_W, 3), Config.COL_PANEL, dtype=np.uint8)
-
-        # Grid
-        cx = self.TRAJ_W // 2
-        cy = self.TRAJ_H // 2
-        for d in range(1, 6):
-            r = int(d * Config.TRAJ_SCALE)
-            cv2.circle(panel, (cx, cy), r, (40, 42, 50), 1)
-        cv2.line(panel, (0, cy), (self.TRAJ_W, cy), (40, 42, 50), 1)
-        cv2.line(panel, (cx, 0), (cx, self.TRAJ_H), (40, 42, 50), 1)
-
-        # Axis labels
-        cv2.putText(panel, "N", (cx + 4, 14),
-                    self._font, 0.4, Config.COL_GREY, 1, cv2.LINE_AA)
-        cv2.putText(panel, "E", (self.TRAJ_W - 16, cy - 4),
-                    self._font, 0.4, Config.COL_GREY, 1, cv2.LINE_AA)
-
-        # Title
-        cv2.putText(panel, "TRAJECTORY", (8, 18),
-                    self._font, 0.45, Config.COL_ACCENT, 1, cv2.LINE_AA)
-
-        # Draw path
-        if len(traj) > 1:
-            pts_px = []
-            for (tx, ty) in traj:
-                px = cx + int(tx * Config.TRAJ_SCALE)
-                py = cy - int(ty * Config.TRAJ_SCALE)
-                px = max(0, min(self.TRAJ_W - 1, px))
-                py = max(0, min(self.TRAJ_H - 1, py))
-                pts_px.append((px, py))
-
-            # Fade older path segments
-            n = len(pts_px)
-            for i in range(1, n):
-                alpha = i / n
-                col = tuple(int(c * alpha) for c in Config.COL_TRACK)
-                cv2.line(panel, pts_px[i-1], pts_px[i], col, 1)
-
-            # Bright recent portion
-            recent = pts_px[max(0, n-60):]
-            for i in range(1, len(recent)):
-                cv2.line(panel, recent[i-1], recent[i], Config.COL_ACCENT, 2)
-
-        # Current position marker
-        cur_px = cx + int(pose["x"] * Config.TRAJ_SCALE)
-        cur_py = cy - int(pose["y"] * Config.TRAJ_SCALE)
-        cur_px = max(2, min(self.TRAJ_W - 3, cur_px))
-        cur_py = max(2, min(self.TRAJ_H - 3, cur_py))
-
-        # Heading arrow
-        yaw = math.radians(pose["yaw_deg"])
-        arrow_len = 16
-        ax = cur_px + int(arrow_len * math.sin(yaw))
-        ay = cur_py - int(arrow_len * math.cos(yaw))
-        cv2.arrowedLine(panel, (cur_px, cur_py), (ax, ay),
-                        Config.COL_WHITE, 2, tipLength=0.35)
-        cv2.circle(panel, (cur_px, cur_py), 5, Config.COL_WHITE, -1)
-        cv2.circle(panel, (cur_px, cur_py), 7, Config.COL_ACCENT,  2)
-
-        # Scale indicator
-        scale_px = Config.TRAJ_SCALE
-        bar_x = 8; bar_y = self.TRAJ_H - 16
-        cv2.line(panel, (bar_x, bar_y), (bar_x + scale_px, bar_y),
-                 Config.COL_GREY, 1)
-        cv2.line(panel, (bar_x, bar_y - 3), (bar_x, bar_y + 3),
-                 Config.COL_GREY, 1)
-        cv2.line(panel, (bar_x + scale_px, bar_y - 3),
-                 (bar_x + scale_px, bar_y + 3), Config.COL_GREY, 1)
-        cv2.putText(panel, "1 m", (bar_x + scale_px // 2 - 10, bar_y - 5),
-                    self._font, 0.35, Config.COL_GREY, 1, cv2.LINE_AA)
-
-        return panel
-
-    # ------------------------------------------------------------------
-    def _draw_telemetry(
-        self, canvas: np.ndarray, y: int, pose: dict, frame_idx: int
-    ):
-        """Bottom telemetry bar."""
-        now = time.time()
-        self._fps_times.append(now)
-        self._fps_times = [t for t in self._fps_times if now - t < 1.0]
-        fps = len(self._fps_times)
-
-        # Background
-        cv2.rectangle(canvas,
-                      (0, y), (self._canvas_w, y + self.TELEMETRY_H),
-                      Config.COL_PANEL, -1)
-        cv2.line(canvas, (0, y), (self._canvas_w, y), (50, 50, 60), 1)
-
-        # Left block: position
-        fields = [
-            ("X",    f"{pose['x']:+7.2f} m"),
-            ("Y",    f"{pose['y']:+7.2f} m"),
-            ("Z",    f"{pose['z']:+7.2f} m"),
-            ("YAW",  f"{pose['yaw_deg']:+7.1f}°"),
-        ]
-        col_w = 130
-        for i, (key, val) in enumerate(fields):
-            bx = 12 + i * col_w
-            by = y + 24
-            cv2.putText(canvas, key, (bx, by),
-                        self._font, 0.38, Config.COL_GREY, 1, cv2.LINE_AA)
-            cv2.putText(canvas, val, (bx, by + 24),
-                        self._font, 0.55, Config.COL_WHITE, 1, cv2.LINE_AA)
-
-        # Middle block: quality bar
-        qx = 12 + 4 * col_w + 20
-        qy = y + 20
-        cv2.putText(canvas, "TRACK QUALITY", (qx, qy),
-                    self._font, 0.38, Config.COL_GREY, 1, cv2.LINE_AA)
-        bar_w = 160; bar_h = 12
-        cv2.rectangle(canvas, (qx, qy + 8), (qx + bar_w, qy + 8 + bar_h),
-                      (50, 50, 60), -1)
-        q = max(0.0, min(1.0, pose["tracking_quality"]))
-        q_col = (
-            Config.COL_GREEN  if q > 0.6 else
-            Config.COL_ORANGE if q > 0.3 else
-            Config.COL_RED
-        )
-        cv2.rectangle(canvas,
-                      (qx, qy + 8),
-                      (qx + int(bar_w * q), qy + 8 + bar_h),
-                      q_col, -1)
-        cv2.putText(canvas, f"{q:.0%}  {pose['num_features']} pts",
-                    (qx, qy + 38),
-                    self._font, 0.45, Config.COL_WHITE, 1, cv2.LINE_AA)
-
-        # Right block: fps + frame
-        rx = self._canvas_w - 120
-        cv2.putText(canvas, f"{fps:2d} FPS", (rx, y + 28),
-                    self._font, 0.55, Config.COL_ACCENT, 1, cv2.LINE_AA)
-        cv2.putText(canvas, f"#{frame_idx:06d}", (rx, y + 54),
-                    self._font, 0.4, Config.COL_GREY, 1, cv2.LINE_AA)
-
-        # Key hints
-        hints = "R:reset  D:dets  F:feats  S:snap  Q:quit"
-        cv2.putText(canvas, hints,
-                    (12, y + self.TELEMETRY_H - 8),
-                    self._font, 0.35, Config.COL_GREY, 1, cv2.LINE_AA)
-
-    # ------------------------------------------------------------------
-    @staticmethod
-    def _text_size(text: str, scale: float, thickness: int) -> tuple[int, int]:
-        (w, h), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, scale, thickness)
-        return w, h
-
-    @staticmethod
-    def _chip(img: np.ndarray, text: str, pos: tuple, color: tuple):
-        """Rounded status chip."""
-        (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
-        x, y = pos
-        pad = 6
-        cv2.rectangle(img, (x, y), (x + tw + pad*2, y + th + pad*2),
-                      color, -1, cv2.LINE_AA)
-        cv2.putText(img, text, (x + pad, y + th + pad - 1),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 0), 1, cv2.LINE_AA)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# MAIN LOOP
-# ─────────────────────────────────────────────────────────────────────────────
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="AeroPerception — Visual Odometry Demo"
+    ap = argparse.ArgumentParser(description="AeroPerception VO Demo v2")
+    ap.add_argument("--source", default="0")
+    ap.add_argument("--no-detector", action="store_true")
+    ap.add_argument("--width", type=int, default=Config.FRAME_WIDTH)
+    ap.add_argument("--height", type=int, default=Config.FRAME_HEIGHT)
+    ap.add_argument(
+        "--scale",
+        type=float,
+        default=None,
+        help="Scale factor: bigger = larger map moves (default 0.08)",
     )
-    parser.add_argument(
-        "--source", default="0",
-        help="Camera index (0,1,2…) or path to video file (default: 0)"
+    ap.add_argument(
+        "--min-disp",
+        type=float,
+        default=None,
+        help="Stillness gate in pixels (default 0.8)",
     )
-    parser.add_argument(
-        "--no-detector", action="store_true",
-        help="Skip loading YOLOv8 (faster startup, no detections)"
-    )
-    parser.add_argument(
-        "--width", type=int, default=Config.FRAME_WIDTH,
-        help="Capture width (default 1280)"
-    )
-    parser.add_argument(
-        "--height", type=int, default=Config.FRAME_HEIGHT,
-        help="Capture height (default 720)"
-    )
-    args = parser.parse_args()
+    args = ap.parse_args()
 
     if args.no_detector:
         Config.DETECTOR_ENABLED = False
+    if args.scale is not None:
+        Config.SCALE_FACTOR = args.scale
+    if args.min_disp is not None:
+        Config.MIN_PIXEL_DISP = args.min_disp
 
-    # ── Open capture ────────────────────────────────────────────────────
-    source = int(args.source) if args.source.isdigit() else args.source
-    cap = cv2.VideoCapture(source)
-
+    src = int(args.source) if args.source.isdigit() else args.source
+    cap = cv2.VideoCapture(src)
     if not cap.isOpened():
-        print(f"[ERROR] Cannot open camera/video: {args.source}")
-        print("  Try: python main.py --source 0   (built-in webcam)")
-        print("       python main.py --source 1   (external webcam)")
+        print(f"[ERROR] Cannot open: {args.source}")
         sys.exit(1)
 
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH,  args.width)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, args.width)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, args.height)
-    cap.set(cv2.CAP_PROP_FPS,          Config.TARGET_FPS)
+    cap.set(cv2.CAP_PROP_FPS, Config.TARGET_FPS)
 
-    # Read actual dimensions (may differ from requested)
     ret, probe = cap.read()
     if not ret:
-        print("[ERROR] Could not read first frame.")
+        print("[ERROR] No first frame")
         sys.exit(1)
 
-    actual_h, actual_w = probe.shape[:2]
-    print(f"[CAM]  {actual_w}×{actual_h} @ {Config.TARGET_FPS} fps")
+    H, W = probe.shape[:2]
+    print(f"[CAM]  {W}×{H}")
 
-    # ── Init subsystems ─────────────────────────────────────────────────
-    K   = estimate_camera_matrix(actual_w, actual_h)
-    vo  = VisualOdometry(K)
-    viz = Visualiser(actual_w, actual_h)
+    K = estimate_K(W, H)
+    vo = VisualOdometry(K)
+    viz = Visualiser(W, H)
 
-    print("[VO]   Lucas-Kanade optical flow ready")
-    print(f"       K = fx={K[0,0]:.1f} fy={K[1,1]:.1f} cx={K[0,2]:.1f} cy={K[1,2]:.1f}")
+    print(
+        f"[VO]   stillness gate={Config.MIN_PIXEL_DISP}px  scale={Config.SCALE_FACTOR}"
+    )
+    print(f"       Tune with:  --scale 0.12  --min-disp 1.2  etc.")
 
-    if Config.DETECTOR_ENABLED:
-        detector = DetectorThread()
-        print(f"[DET]  YOLOv8-nano loading in background (model: {Config.DETECTOR_MODEL})")
-    else:
-        detector = None
-        print("[DET]  Detector disabled (--no-detector)")
+    det = DetectorThread() if Config.DETECTOR_ENABLED else None
+    if det:
+        print("[DET]  YOLOv8-nano loading in background…")
 
-    # ── Window ──────────────────────────────────────────────────────────
-    win_name = "AeroPerception — VO Demo"
-    cv2.namedWindow(win_name, cv2.WINDOW_NORMAL)
-    cv2.resizeWindow(win_name, viz._canvas_w, viz._canvas_h)
+    win = "AeroPerception — VO Demo v2"
+    cv2.namedWindow(win, cv2.WINDOW_NORMAL)
+    cv2.resizeWindow(win, viz._cw, viz._ch)
 
-    show_features  = True
-    show_detections = True
-    frame_idx = 0
-    snap_idx  = 0
+    sh = sd = True
+    fi = si = 0
 
-    print()
-    print("━" * 50)
-    print("  CONTROLS")
-    print("  R — reset pose to origin")
-    print("  D — toggle object detections")
-    print("  F — toggle feature point overlay")
-    print("  S — save snapshot")
-    print("  Q / ESC — quit")
-    print("━" * 50)
-    print()
-    print("  Move the camera slowly to build a trajectory.")
-    print("  Fast motion → tracking LOST (expected — slow down and")
-    print("  features will reinitialise).")
-    print()
+    print("\n  R:reset  D:dets  F:features  S:snap  Q:quit")
+    print("  Watch 'Dpx' — near 0 when still, >1 when moving.\n")
 
-    # ── Main loop ───────────────────────────────────────────────────────
     while True:
         ret, frame = cap.read()
         if not ret:
-            if isinstance(source, str):
-                # End of video file — loop
+            if not isinstance(src, int):
                 cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                 continue
             break
-
-        frame_idx += 1
-
-        # Run VO
+        fi += 1
         pose = vo.update(frame)
+        if det:
+            det.submit(frame)
+        dets = det.detections if det else []
 
-        # Submit to detector (non-blocking, throttled)
-        if detector is not None:
-            detector.submit(frame)
+        display = viz.render(frame, pose, dets, sh, sd, vo.trajectory, fi)
+        cv2.imshow(win, display)
 
-        # Get latest detections
-        dets = detector.detections if detector is not None else []
-
-        # Render
-        display = viz.render(
-            frame=frame,
-            pose=pose,
-            detections=dets,
-            show_feats=show_features,
-            show_dets=show_detections,
-            traj=vo.trajectory,
-            frame_idx=frame_idx,
-        )
-
-        cv2.imshow(win_name, display)
-
-        # Key handling
-        key = cv2.waitKey(1) & 0xFF
-
-        if key in (ord('q'), ord('Q'), 27):   # Q or ESC
+        k = cv2.waitKey(1) & 0xFF
+        if k in (ord("q"), ord("Q"), 27):
             break
-
-        elif key in (ord('r'), ord('R')):
+        elif k in (ord("r"), ord("R")):
             vo.reset()
-            print("[VO]   Pose reset to origin")
-
-        elif key in (ord('d'), ord('D')):
-            if detector is not None:
-                detector.toggle()
-                show_detections = detector.enabled
+            print("[VO]  reset")
+        elif k in (ord("d"), ord("D")):
+            if det:
+                det.toggle()
+                sd = det.enabled
             else:
-                show_detections = not show_detections
-            print(f"[DET]  {'ON' if show_detections else 'OFF'}")
+                sd = not sd
+        elif k in (ord("f"), ord("F")):
+            sh = not sh
+        elif k in (ord("s"), ord("S")):
+            p = f"snap_{si:04d}.png"
+            cv2.imwrite(p, display)
+            print(f"[SNAP] {p}")
+            si += 1
 
-        elif key in (ord('f'), ord('F')):
-            show_features = not show_features
-            print(f"[FEAT] {'ON' if show_features else 'OFF'}")
-
-        elif key in (ord('s'), ord('S')):
-            snap_path = f"snap_{snap_idx:04d}.png"
-            cv2.imwrite(snap_path, display)
-            print(f"[SNAP] Saved {snap_path}")
-            snap_idx += 1
-
-    # ── Cleanup ──────────────────────────────────────────────────────────
     cap.release()
     cv2.destroyAllWindows()
-    print("\n[DONE] Session ended.")
+    print("\n[DONE]")
     if len(vo.trajectory) > 1:
-        xs = [p[0] for p in vo.trajectory]
-        ys = [p[1] for p in vo.trajectory]
-        total_dist = sum(
-            math.hypot(vo.trajectory[i][0] - vo.trajectory[i-1][0],
-                       vo.trajectory[i][1] - vo.trajectory[i-1][1])
+        xs, ys = zip(*vo.trajectory)
+        dist = sum(
+            math.hypot(
+                vo.trajectory[i][0] - vo.trajectory[i - 1][0],
+                vo.trajectory[i][1] - vo.trajectory[i - 1][1],
+            )
             for i in range(1, len(vo.trajectory))
         )
-        print(f"  Frames processed : {frame_idx}")
-        print(f"  Path length      : {total_dist:.2f} m (estimated)")
-        print(f"  X range          : {min(xs):.2f} → {max(xs):.2f} m")
-        print(f"  Y range          : {min(ys):.2f} → {max(ys):.2f} m")
+        print(
+            f"  Frames: {fi}  |  Path: {dist:.2f} m  |  "
+            f"X: {min(xs):.2f}→{max(xs):.2f}  Y: {min(ys):.2f}→{max(ys):.2f}"
+        )
 
-
-# ─────────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     main()
