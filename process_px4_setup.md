@@ -148,3 +148,37 @@ Dockerfile_ros2_22_04:16
 --------------------
 ERROR: failed to solve: failed to compute cache key: chmod /var/lib/desktop-containerd/daemon/io.containerd.snapshotter.v1.overlayfs/snapshots/93/fs/usr/share/libwacom/elan-2a70.tablet: input/output error: unknown
 ```
+
+# Trying to setup with docker container
+
+brew install podman
+podman machine init --disk-size 20
+podman machine start
+
+brew install --cask xquartz
+
+```
+# enable access to xhost from the container
+xhost +
+
+# Run podman and open bash shell
+podman run -it --privileged \
+--env=LOCAL_USER_ID="$(id -u)" \
+-v ~/src/PX4-Autopilot:/src/PX4-Autopilot/:rw \
+-v /tmp/.X11-unix:/tmp/.X11-unix:ro \
+-e DISPLAY=host.docker.internal:0 \
+--network host \
+--name=px4-dev px4io/px4-dev:v1.16.0 bash
+```
+
+Response:
+
+```
+access control disabled, clients can connect from any host
+Resolving "px4io/px4-dev" using unqualified-search registries (/etc/containers/registries.conf.d/999-podman-machine.conf)
+Trying to pull docker.io/px4io/px4-dev:v1.16.0...
+Error: unable to copy from source docker://px4io/px4-dev:v1.16.0: choosing an image from manifest list docker://px4io/px4-dev:v1.16.0: no image found in image index for architecture "arm64", variant "v8", OS "linux"
+```
+
+No docker images found for mac os.
+So will have to try another solution for the autopilot that is not PX4
