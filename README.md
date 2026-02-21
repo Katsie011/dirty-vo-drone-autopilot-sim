@@ -1,4 +1,4 @@
-# Autonomous Aerial Robotics Stack
+# (Aspirational) Autonomous Aerial Robotics Stack
 
 This repository documents an in-progress, simulation-first exploration into integrating **PX4** and **ROS 2**.
 
@@ -11,7 +11,7 @@ Naturally, I am trying to learn and move fast. So I will leverage the hell out o
 Goal is to learn. And we gotta move quick.
 
 Here's a nasty demo pic of the first iteration of the UI:
-![Demo pic](media/readme/demo_screenshot.png)
+![Demo pic](media/readme/ORB_Demo.png)
 
 ## Overview
 
@@ -79,3 +79,31 @@ ros2 launch autonomous_stack bringup.launch.py
 - Explore commercial directions (e.g., aerial surveillance).
 
 See `ROADMAP.md` for detailed milestones and development phases.
+
+# Design process logs
+
+## Step 1. Bare bones MVP
+
+Question here was whether it was possible to build a full perception pipeline that was integrated with a drone control software (simulated) such as PX4.  
+After spending too much time trying to get PX4 working in a docker env, since I am working on Mac which it does not like, I simplified the MVP goal to just a VO motion tracking.
+
+**v0.0.1 Lukas-Kande Motion Tracking**
+Works great for initial lose tracking.
+Runs at high speed.
+However, indoor testing -- in the living room (with me waving my laptop in the air like a lunatic) I see that we do not get any accurate odometry.
+LK features are highly sensitive to rotation.
+With the goal being drone deployment, this is not an option.
+
+**v0.0.2 ORB features**
+Switching to ORB features and an improved RANSAC estimation of the Essential matrix has improved odometry significantly.
+There are less jumps in the position and it seems far more reliable.
+
+Feature tracking quality has also improved significantly, especially with rotation.
+
+**v0.0.3 Physics based state estimator**
+Pure VO is cool, but it could be better.
+Our pipeline is currently treating each pair of images as a discrete problem, when they are linked to previous frames in reality.
+Our velocity now is tied to our velocity a few moments ago.
+
+By maintaining a rolling estimate of velocity and acceleration, we now provide the vision pipeline with a "prediction" of the next frame. This creates a feedback loop: the physics model guides the vision search, and the vision results (validated by RANSAC) correct the physics model's drift.
+When tuned well, this "tight coupling" should further improve stability in aggressive maneuvers.
