@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-AeroPerception — Visual Odometry Demo  v2
-==========================================
+AeroPerception — Visual Odometry Demo  v3 (ORB + Essential Matrix)
+====================================================================
 Run with:
     python main.py                   # default webcam
     python main.py --source 1        # external webcam
@@ -11,26 +11,36 @@ Controls:
     R — reset pose  |  D — detections  |  F — features
     S — snapshot    |  Q / ESC — quit
 
-Tuning flags (useful when calibrating):
-    --scale N       larger → bigger movements on map (default 0.08)
-    --min-disp N    larger → harder to trigger motion (default 0.8 px)
-    --no-detector   skip YOLOv8 for faster startup
+Tuning flags:
+    --scale N       movement scale (default 0.08)
+    --min-disp N    stillness gate in pixels (default 1.2)
+    --no-detector   skip YOLOv8
 
-v2 bug-fixes vs v1:
-  BUG 1 — Pose updated unconditionally even when stationary.
-           Fixed: median pixel displacement gate; if Δpx < MIN_PIXEL_DISP,
-           skip the pose update entirely (primary jitter fix).
-  BUG 2 — Yaw extracted via atan2(R[1,0],R[0,0]) which conflates pitch/roll
-           into the yaw estimate.
-           Fixed: Rodrigues decomposition → z-axis component only.
-  BUG 3 — recoverPose received ALL tracked points, not just RANSAC inliers.
-           Fixed: apply e_mask from findEssentialMat before recoverPose.
-  BUG 4 — Trajectory point appended before quality/inlier check.
-           Fixed: append only after confirmed motion.
-  NEW  — Bidirectional LK consistency check removes unreliable correspondences.
-  NEW  — Gaussian pre-blur reduces pixel noise before feature detection.
-  NEW  — EMA applied to *displayed* pose only (smooths render, not trajectory).
-  NEW  — --scale and --min-disp CLI flags for interactive tuning.
+v3 architecture (feature-based):
+  REPLACED: Lucas-Kanade optical flow tracking
+  WITH:     ORB feature detection + descriptor matching
+
+  WHY:
+    - Rotation invariant (LK breaks on fast yaw)
+    - Re-localization after tracking loss (descriptors can be re-matched)
+    - Cleaner correspondences → better Essential Matrix estimation
+    - Same RANSAC outlier rejection, now on descriptor matches
+
+  KEPT:
+    - Essential Matrix decomposition → R, t
+    - Median pixel displacement stillness gate
+    - EMA smoothing on display pose
+    - All visualization and telemetry
+
+  ALGORITHM:
+    Frame N:   detect ORB keypoints + compute 256-bit descriptors
+    Frame N+1: detect ORB keypoints + compute descriptors
+    Match:     Brute-force Hamming distance (binary descriptors)
+    Filter:    Lowe's ratio test (reject ambiguous matches)
+    Gate:      Median pixel displacement < threshold → stationary
+    Solve:     cv2.findEssentialMat with RANSAC on matched keypoints
+    Decompose: cv2.recoverPose → R, t
+    Integrate: Update pose in world frame
 
 Dependencies:  pip install opencv-python numpy ultralytics
 """
@@ -47,12 +57,23 @@ from typing import Optional
 import cv2
 import numpy as np
 
+from utils.config import Config
+from utils.visualizer import Visualiser
+from utils.orb_vo import VisualOdometry
+from utils.obj_detector import DetectorThread
+
+
 warnings.filterwarnings("ignore")
 
-from config import Config
-from utils.obj_detector import DetectorThread
-from visualizer import Visualiser
-from utils import lk_vo
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CAMERA INTRINSICS
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def estimate_K(w: int, h: int) -> np.ndarray:
+    fx = (w / 2.0) / math.tan(math.radians(70.0) / 2.0)
+    return np.array([[fx, 0, w / 2.0], [0, fx, h / 2.0], [0, 0, 1.0]], dtype=np.float64)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -61,23 +82,13 @@ from utils import lk_vo
 
 
 def main():
-    ap = argparse.ArgumentParser(description="AeroPerception VO Demo v2")
+    ap = argparse.ArgumentParser(description="AeroPerception VO Demo v3 (ORB)")
     ap.add_argument("--source", default="0")
     ap.add_argument("--no-detector", action="store_true")
     ap.add_argument("--width", type=int, default=Config.FRAME_WIDTH)
     ap.add_argument("--height", type=int, default=Config.FRAME_HEIGHT)
-    ap.add_argument(
-        "--scale",
-        type=float,
-        default=None,
-        help="Scale factor: bigger = larger map moves (default 0.08)",
-    )
-    ap.add_argument(
-        "--min-disp",
-        type=float,
-        default=None,
-        help="Stillness gate in pixels (default 0.8)",
-    )
+    ap.add_argument("--scale", type=float, default=None)
+    ap.add_argument("--min-disp", type=float, default=None)
     args = ap.parse_args()
 
     if args.no_detector:
@@ -106,27 +117,25 @@ def main():
     print(f"[CAM]  {W}×{H}")
 
     K = estimate_K(W, H)
-    vo = lk_vo.VisualOdometry(K)
+    vo = VisualOdometry(K)
     viz = Visualiser(W, H)
 
-    print(
-        f"[VO]   stillness gate={Config.MIN_PIXEL_DISP}px  scale={Config.SCALE_FACTOR}"
-    )
-    print(f"       Tune with:  --scale 0.12  --min-disp 1.2  etc.")
+    print(f"[VO]   ORB feature-based")
+    print(f"       {Config.ORB_N_FEATURES} features, ratio={Config.MATCH_RATIO_THRESH}")
+    print(f"       stillness={Config.MIN_PIXEL_DISP}px  scale={Config.SCALE_FACTOR}")
 
     det = DetectorThread() if Config.DETECTOR_ENABLED else None
     if det:
-        print("[DET]  YOLOv8-nano loading in background…")
+        print("[DET]  YOLOv8-nano loading…")
 
-    win = "AeroPerception — VO Demo v2"
+    win = "AeroPerception — VO Demo v3 (ORB)"
     cv2.namedWindow(win, cv2.WINDOW_NORMAL)
     cv2.resizeWindow(win, viz._cw, viz._ch)
 
     sh = sd = True
     fi = si = 0
 
-    print("\n  R:reset  D:dets  F:features  S:snap  Q:quit")
-    print("  Watch 'Dpx' — near 0 when still, >1 when moving.\n")
+    print("\n  R:reset  D:dets  F:features  S:snap  Q:quit\n")
 
     while True:
         ret, frame = cap.read()
@@ -176,10 +185,8 @@ def main():
             )
             for i in range(1, len(vo.trajectory))
         )
-        print(
-            f"  Frames: {fi}  |  Path: {dist:.2f} m  |  "
-            f"X: {min(xs):.2f}→{max(xs):.2f}  Y: {min(ys):.2f}→{max(ys):.2f}"
-        )
+        print(f"  Frames: {fi}  |  Path: {dist:.2f} m")
+        print(f"  X: {min(xs):.2f}→{max(xs):.2f}  Y: {min(ys):.2f}→{max(ys):.2f}")
 
 
 if __name__ == "__main__":

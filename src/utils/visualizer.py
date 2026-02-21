@@ -1,8 +1,9 @@
-import math
-import time
 import cv2
 import numpy as np
-from utils.config import Config
+import math
+import time
+from .config import Config
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # VISUALISER
@@ -10,7 +11,7 @@ from utils.config import Config
 
 
 class Visualiser:
-    TH = 88  # telemetry bar height
+    TH = 92
     TW = Config.TRAJ_SIZE
     TH_P = Config.TRAJ_SIZE
 
@@ -26,17 +27,24 @@ class Visualiser:
         self._f = cv2.FONT_HERSHEY_SIMPLEX
         self._fps_t: list[float] = []
 
-    # ─────────────────────────────────────────────────────────────────
     def render(self, frame, pose, dets, feats, det_on, traj, idx):
         canvas = np.full((self._ch, self._cw, 3), Config.COL_BG, dtype=np.uint8)
-
-        # Camera panel
         cam = cv2.resize(frame, (self._dw, self._dh))
-        if feats and pose["tracked_points"] is not None:
-            for pt in pose["tracked_points"]:
-                px, py = int(pt[0] * self._sc), int(pt[1] * self._sc)
-                cv2.circle(cam, (px, py), 3, Config.COL_GREEN, -1)
-                cv2.circle(cam, (px, py), 5, Config.COL_GREEN, 1)
+
+        if feats and pose["keypoints"] is not None and len(pose["keypoints"]) > 0:
+            for kp in pose["keypoints"]:
+                px, py = int(kp.pt[0] * self._sc), int(kp.pt[1] * self._sc)
+                angle = kp.angle
+                r = int(kp.size / 2 * self._sc)
+                if r < 2:
+                    r = 3
+                cv2.circle(cam, (px, py), r, Config.COL_GREEN, 1)
+                if angle >= 0:
+                    rad = math.radians(angle)
+                    ex = int(px + r * math.cos(rad))
+                    ey = int(py + r * math.sin(rad))
+                    cv2.line(cam, (px, py), (ex, ey), Config.COL_GREEN, 1)
+
         if det_on:
             sx, sy = self._dw / self._fw, self._dh / self._fh
             for d in dets:
@@ -59,7 +67,6 @@ class Visualiser:
                     cv2.LINE_AA,
                 )
 
-        # Status chip
         sc = {
             "HEALTHY": Config.COL_GREEN,
             "STATIONARY": Config.COL_CYAN,
@@ -70,7 +77,7 @@ class Visualiser:
         self._chip(cam, pose["status"], (10, 10), sc)
         cv2.putText(
             cam,
-            f"Dpx {pose['pixel_disp']:.1f}",
+            f"Dpx:{pose['pixel_disp']:.1f}  M:{pose['num_matches']}",
             (10, self._dh - 12),
             self._f,
             0.4,
@@ -84,7 +91,6 @@ class Visualiser:
         self._telemetry(canvas, self._dh, pose, idx)
         return canvas
 
-    # ─────────────────────────────────────────────────────────────────
     def _traj_panel(self, traj, pose):
         p = np.full((self.TH_P, self.TW, 3), Config.COL_PANEL, dtype=np.uint8)
         cx, cy = self.TW // 2, self.TH_P // 2
@@ -151,7 +157,6 @@ class Visualiser:
         )
         return p
 
-    # ─────────────────────────────────────────────────────────────────
     def _telemetry(self, canvas, y, pose, idx):
         now = time.time()
         self._fps_t.append(now)
@@ -197,11 +202,21 @@ class Visualiser:
         cv2.rectangle(canvas, (qx, y + 28), (qx + int(160 * q), y + 40), qc, -1)
         cv2.putText(
             canvas,
-            f"{q:.0%}  {pose['num_features']} pts  Dpx:{pose['pixel_disp']:.1f}",
-            (qx, y + 58),
+            f"{q:.0%}  {pose['num_features']} feats",
+            (qx, y + 54),
             self._f,
             0.42,
             Config.COL_WHITE,
+            1,
+            cv2.LINE_AA,
+        )
+        cv2.putText(
+            canvas,
+            f"{pose['num_matches']} matches  Dpx:{pose['pixel_disp']:.1f}",
+            (qx, y + 72),
+            self._f,
+            0.38,
+            Config.COL_GREY,
             1,
             cv2.LINE_AA,
         )
@@ -238,7 +253,6 @@ class Visualiser:
             cv2.LINE_AA,
         )
 
-    # ─────────────────────────────────────────────────────────────────
     @staticmethod
     def _chip(img, text, pos, color):
         (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)

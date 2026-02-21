@@ -1,8 +1,9 @@
 import threading
 import queue
-from config import Config
+from utils.config import Config
 import time
 import numpy as np
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # DETECTOR
